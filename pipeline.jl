@@ -13,6 +13,8 @@ begin
 	using CSV: CSV
 	using DataFrames: DataFrames as DF, DataFrame
 	using DuckDB: DuckDB as DDB, DBInterface
+	using JuMP: JuMP
+	using Plots: Plots
 	using PlutoUI: PlutoUI as PUI
 	using TulipaClustering: TulipaClustering as TC
 	using TulipaEnergyModel: TulipaEnergyModel as TEM
@@ -127,12 +129,10 @@ md"""
 #### Profiles data
 
 These profiles include the values of an year hourly.
+These values were obtained from the representative period mapping and profiles by extending them and then adding Normal noise to it.
 
 !!! tip "TODO TulipaClustering"
 	Rename asset and time_step to sync with TEM.
-
-!!! tip "TODO"
-	The profile data was randomly generated, we should use better data.
 
 !!! tip "TODO"
 	Decide how we want to handle profile-type + profily_name and make it uniform.
@@ -141,6 +141,11 @@ These profiles include the values of an year hourly.
 
 # ╔═╡ 59c4f23d-55e5-4375-b9b1-d08b9c5a40d0
 DDB.execute(connection, "SELECT * FROM all_profiles") |> DataFrame
+
+# ╔═╡ 652457bd-5391-4ef5-b714-32eebbd15cbb
+Plots.plot(
+	DDB.execute(connection, "SELECT value FROM all_profiles WHERE asset = 'demand-Midgard_E_demand'") |> DataFrame |> df -> df.value
+)
 
 # ╔═╡ e9f8d407-0265-4783-b63d-934ff7a0cc7b
 DDB.execute(connection, "SELECT * FROM all_profiles WHERE asset = 'availability-Asgard_Solar'") |> DataFrame
@@ -189,11 +194,15 @@ DF.subset(tc_df, :asset => DF.ByRow(==("availability-Asgard_Solar")))
 
 # ╔═╡ df1a421e-7d54-48a5-9f91-14175e0fd596
 # Example asset
-DF.subset(tc_df, [:asset,:period] => DF.ByRow((a,p) -> a == "availability-Asgard_Solar" && p == 1))
+DF.subset(
+	tc_df,
+	:asset => DF.ByRow(==("availability-Asgard_Solar")),
+	:period => DF.ByRow(==(1)),
+)
 
 # ╔═╡ 2d123f6b-1d94-425a-b37b-acc71e035519
 begin
-	clustering_result = TC.find_representative_periods(tc_df, 35)
+	clustering_result = TC.find_representative_periods(tc_df, 5)
 	nothing
 end
 
@@ -212,9 +221,8 @@ DF.subset(
 # ╔═╡ 8e5d990c-8d56-47ee-b1df-b6d375586241
 DF.subset(
 	clustering_result.profiles,
-	[:asset,:rep_period] => DF.ByRow(
-		(a, rp) -> a == "availability-Asgard_Solar" && rp == 1
-	)
+	:asset => DF.ByRow(==("availability-Asgard_Solar")),
+	:rep_period => DF.ByRow(==(1)),
 )
 
 # ╔═╡ eb88c4aa-6c15-4a4e-a05e-951fa39a49e1
@@ -240,7 +248,7 @@ md"""
 """
 
 # ╔═╡ 94fea98b-9f16-48ab-97fc-aa2467a7ced2
-let
+begin
 	DDB.register_data_frame(
 		connection,
 		TC.weight_matrix_to_df(clustering_result.weight_matrix),
@@ -318,17 +326,31 @@ end
 md"""
 ## Step 3 - TulipaEnergyModel
 
-We finally start with TEM.
+We finally start with TEM. In addition to all data that was used so far, we need data that can only be computed after we have the representative periods (or at least the splitting of the initial periods).
 """
 
 # ╔═╡ 1ad97d2f-1716-47ea-a300-406d270fbe6f
 md"""
 ### Step 3.1 - User provided info
+
+Here is how to provide the additional information.
 """
 
 # ╔═╡ bbcca6dd-45d1-4d70-a0a3-cd91b8a1570b
 md"""
 #### `assets_timeframe_profiles`
+
+The timeframe (the year) was divided into $(div(365 * 24, period_duration)) periods of $period_duration h. These periods are represented by $num_rep_periods representative periods.
+
+Most of the constraints apply within a representative period, but some apply to the "outer" periods, i.e., the 365 periods.
+For some of these, you might need additional profiles.
+In this section you can inform the timeframe profiles.
+
+!!! tip "TODO"
+	What to do for the default case? Should we allow missing tables? Should we create convenience functions?
+
+!!! tip "TODO"
+	Add some example timeframe profiles.
 """
 
 # ╔═╡ 10dbc445-3e9b-45a6-a67a-3469faf0106d
@@ -347,6 +369,23 @@ end
 # ╔═╡ dc52d2f3-6f24-4dd8-ac38-09bc94afe012
 md"""
 #### Partitions
+
+By default, all variables and constraints are defined in an hourly resolution, i.e., the representative period is partitioned uniformly with 1 timestep per hour.
+
+However, sometimes we want to set a different resolution to a flow, or a different resolution to balance constraints in an asset.
+For that, we can add information to the tables below.
+
+We can change the partitioning of the representative period in the given situations:
+
+- The partitioning of representative periods in an asset.
+- The partitioning of representative periods in a flow;
+- The partitioning of the timeframe periods in an asset.
+
+!!! tip "TODO"
+	Add an example of partitioning
+
+!!! tip "TODO"
+	What should we do for the default case? Should we skip this if there is no table?
 """
 
 # ╔═╡ 6adb5dba-6a2a-44e3-b1e9-98e6f40beae4
@@ -386,6 +425,11 @@ end
 # ╔═╡ 05ab44cd-7f47-4a57-9124-d5d77dcca529
 md"""
 ### Step 3.2 - Creating and solving the model
+
+To finally create the model and solve it, we use the `EnergyProblem` structure.
+
+!!! tip "TODO"
+	Align this with the run-scenario interface, otherwise all the timing is lost. The users should inform what they expect to use here.
 """
 
 # ╔═╡ 3349642c-c466-4443-a75e-93a477ce4f17
@@ -393,11 +437,21 @@ begin
 	energy_problem = TEM.EnergyProblem(connection)
 	TEM.create_model!(energy_problem)
 	TEM.solve_model!(energy_problem)
+	energy_problem
 end
+
+# ╔═╡ c9a0cf5c-9b3f-44d5-9c9e-fc2124107497
+JuMP.solution_summary(energy_problem.model)
+
+# ╔═╡ 30c724b9-a9ad-43e0-ab52-d63cbdd9f4cb
+energy_problem.termination_status
 
 # ╔═╡ a029d632-9541-4211-afea-c53fe2bf2908
 md"""
 ## Step 4 - Plotting the solution
+
+!!! tip "TODO"
+	What should be plotted? Use TulipaPlots?
 """
 
 # ╔═╡ 638aad2d-2c40-475c-81de-67696e4fef0c
@@ -407,42 +461,62 @@ md"""
 ## Behind the scenes
 """
 
-# ╔═╡ 3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
-let
-	function nicename(filename)
+# ╔═╡ f0f49ee6-e3ab-4103-b7a8-eabda6830745
+begin
+	function _nicename(filename)
 		filename = replace(filename, "profiles-rep-periods-" => "")
 		filename = replace(filename, "-" => "_")
 		filename, _ = splitext(filename)
 		filename
 	end
-	function read_csv(filename)
+	function _read_csv(filename)
 		CSV.read(joinpath("Norse-from-TEM", filename), DataFrame; header=2)
 	end
+end
+
+# ╔═╡ 657371f9-30a1-4b27-89e0-ba120dcca2eb
+begin
 	# For debugging
-	# rp_data = read_csv("rep-periods-data.csv")
-	# rp_map = read_csv("rep-periods-mapping.csv")
-	# profiles = Dict(
-	# 	nicename(filename) => read_csv(filename)
+	_rp_data = _read_csv("rep-periods-data.csv")
+	_rp_map = _read_csv("rep-periods-mapping.csv")
+	_profiles = Dict(
+		_nicename(filename) => _read_csv(filename)
 
-	# 	for filename in readdir("Norse-from-TEM") if startswith("profiles-rep")(filename)
-	# )
+		for filename in readdir("Norse-from-TEM") if startswith("profiles-rep")(filename)
+	)
 	# End debugging
+	nothing
+end
 
-	df_TC_profiles = DataFrame(:asset => String[], :time_step => Int[], :value => Float64[])
+# ╔═╡ 3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
+let
+	df_TC_profiles = DataFrame(
+		:asset => String[],
+		:time_step => Int[],
+		:value => Float64[],
+	)
 	for filename in readdir("Norse-from-TEM")
 		if !startswith("profiles-rep")(filename)
 			continue
 		end
-		profile_type = nicename(filename)
-		df = read_csv(filename)
+		profile_type = _nicename(filename)
+		df = _read_csv(filename)
 		profile_names = unique(df.profile_name)
 		# Ignore all content and generate fake data for the year
 		for profile_name in profile_names
+			value = clamp.(vcat([
+				DF.subset(
+					df,
+					:profile_name => DF.ByRow(==(profile_name)),
+					:rep_period => DF.ByRow(==(rp)),
+				).value
+				for rp in _rp_map.rep_period
+			]...) + 0.01 * randn(365 * 24), 0, 10)
 			append!(df_TC_profiles,
 				DataFrame(
 					:asset => fill("$profile_type-$profile_name", 365 * 24),
 					:time_step => 1:365 * 24,
-					:value => rand(365 * 24),
+					:value => value,
 				)
 			)
 		end
@@ -460,10 +534,15 @@ let
 end
 
 # ╔═╡ 748da88b-809b-4082-a871-9136263e5055
-
+_profiles["availability"] |> df -> DF.subset(df, :profile_name => DF.ByRow(==("Asgard_Solar")), :rep_period => DF.ByRow(==(1)))
 
 # ╔═╡ bb7d7220-fb0a-49ff-8bcf-9331b76731e5
-
+let
+	v(rp) = DF.subset(_profiles["inflows"],
+		:rep_period => DF.ByRow(==(rp))
+	).value
+	vcat([v(rp) for rp in _rp_map.rep_period]...) |> length
+end
 
 # ╔═╡ Cell order:
 # ╠═6876e975-7525-4139-803b-7bc7d939d6b5
@@ -482,6 +561,7 @@ end
 # ╠═9114c0bf-4848-4365-9333-b275ef8fd285
 # ╠═6ad02eab-d565-47f4-9468-6182f64fc93a
 # ╠═59c4f23d-55e5-4375-b9b1-d08b9c5a40d0
+# ╠═652457bd-5391-4ef5-b714-32eebbd15cbb
 # ╠═e9f8d407-0265-4783-b63d-934ff7a0cc7b
 # ╠═1af1109f-dc99-4d67-bcfc-d4647aa25c1b
 # ╟─9ebf99c7-4296-4541-95f0-0a5b84c2488a
@@ -508,16 +588,20 @@ end
 # ╠═f419e9fe-962c-4377-b56c-41b6bb3483e4
 # ╟─afa3f7b5-5d1a-4b75-8dcf-acace2c09b05
 # ╠═653c44c0-3edc-41be-bbe0-76cf46590cdc
-# ╠═6b73622b-ad36-45eb-8005-bc23c9555f68
-# ╠═1ad97d2f-1716-47ea-a300-406d270fbe6f
+# ╟─6b73622b-ad36-45eb-8005-bc23c9555f68
+# ╟─1ad97d2f-1716-47ea-a300-406d270fbe6f
 # ╠═bbcca6dd-45d1-4d70-a0a3-cd91b8a1570b
 # ╠═10dbc445-3e9b-45a6-a67a-3469faf0106d
 # ╠═dc52d2f3-6f24-4dd8-ac38-09bc94afe012
 # ╠═6adb5dba-6a2a-44e3-b1e9-98e6f40beae4
 # ╠═05ab44cd-7f47-4a57-9124-d5d77dcca529
 # ╠═3349642c-c466-4443-a75e-93a477ce4f17
-# ╠═a029d632-9541-4211-afea-c53fe2bf2908
-# ╠═638aad2d-2c40-475c-81de-67696e4fef0c
+# ╠═c9a0cf5c-9b3f-44d5-9c9e-fc2124107497
+# ╠═30c724b9-a9ad-43e0-ab52-d63cbdd9f4cb
+# ╟─a029d632-9541-4211-afea-c53fe2bf2908
+# ╟─638aad2d-2c40-475c-81de-67696e4fef0c
+# ╠═f0f49ee6-e3ab-4103-b7a8-eabda6830745
+# ╠═657371f9-30a1-4b27-89e0-ba120dcca2eb
 # ╠═3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
 # ╠═748da88b-809b-4082-a871-9136263e5055
 # ╠═bb7d7220-fb0a-49ff-8bcf-9331b76731e5
