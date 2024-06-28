@@ -133,25 +133,22 @@ These values were obtained from the representative period mapping and profiles b
 
 !!! tip "TODO TulipaClustering"
 	Rename asset and time_step to sync with TEM.
-
-!!! tip "TODO"
-	Decide how we want to handle profile-type + profily_name and make it uniform.
-	Given that the clustering must happen in a single profiles file, it might make sense to keep them all together.
+	[TC #34](https://github.com/TulipaEnergy/TulipaClustering.jl/issues/34)
 """
 
 # ╔═╡ 59c4f23d-55e5-4375-b9b1-d08b9c5a40d0
-DDB.execute(connection, "SELECT * FROM all_profiles") |> DataFrame
+DDB.execute(connection, "SELECT * FROM profiles") |> DataFrame
 
 # ╔═╡ 652457bd-5391-4ef5-b714-32eebbd15cbb
 Plots.plot(
-	DDB.execute(connection, "SELECT value FROM all_profiles WHERE asset = 'demand-Midgard_E_demand'") |> DataFrame |> df -> df.value
+	DDB.execute(connection, "SELECT value FROM profiles WHERE asset = 'demand-Midgard_E_demand'") |> DataFrame |> df -> df.value
 )
 
 # ╔═╡ e9f8d407-0265-4783-b63d-934ff7a0cc7b
-DDB.execute(connection, "SELECT * FROM all_profiles WHERE asset = 'availability-Asgard_Solar'") |> DataFrame
+DDB.execute(connection, "SELECT * FROM profiles WHERE asset = 'availability-Asgard_Solar'") |> DataFrame
 
 # ╔═╡ 1af1109f-dc99-4d67-bcfc-d4647aa25c1b
-DDB.execute(connection, "SELECT DISTINCT ON(asset) * FROM all_profiles") |> DataFrame
+DDB.execute(connection, "SELECT DISTINCT ON(asset) * FROM profiles") |> DataFrame
 
 # ╔═╡ 9ebf99c7-4296-4541-95f0-0a5b84c2488a
 md"""
@@ -176,13 +173,14 @@ The representatives are computed using the whole profiles information, so all pr
 
 !!! tip "TODO"
 	Does it make sense to make the `split_into_periods!` function execute at the table level? It would run before creating the dataframes, and thus hopefully it would be faster.
+	[TC #36](https://github.com/TulipaEnergy/TulipaClustering.jl/issues/36)
 """
 
 # ╔═╡ 9cd57f33-9906-4f29-af51-b30a688cade6
 begin
 	period_duration = 24 # will be used later
 	tc_df = DataFrame(
-		DBInterface.execute(connection, "SELECT * FROM all_profiles")
+		DBInterface.execute(connection, "SELECT * FROM profiles")
 	)
 	TC.split_into_periods!(tc_df; period_duration = period_duration)
 	nothing
@@ -228,7 +226,8 @@ DF.subset(
 # ╔═╡ eb88c4aa-6c15-4a4e-a05e-951fa39a49e1
 md"""
 !!! tip "TODO"
-	After we decide on merging `profile_type` + `profile_name`, it might make sense to move this clustering result to DuckDB directly.
+	It might make sense to move this clustering result to DuckDB directly.
+	[TC #36](https://github.com/TulipaEnergy/TulipaClustering.jl/issues/36).
 """
 
 # ╔═╡ 202cca05-e73b-43ed-a126-a52d43516741
@@ -245,6 +244,7 @@ md"""
 
 !!! tip "TODO"
 	The `rep_periods_data` below is actually input information for the clustering. It could have been created earlier on and used explicitly as input so we don't have to create some loose variables.
+	[TC #37](https://github.com/TulipaEnergy/TulipaClustering.jl/issues/37)
 """
 
 # ╔═╡ 94fea98b-9f16-48ab-97fc-aa2467a7ced2
@@ -258,7 +258,7 @@ begin
 	DDB.register_data_frame(
 		connection,
 		DataFrame(
-			:id => 1:num_rep_periods,
+			:rep_period => 1:num_rep_periods,
 			:num_timesteps => period_duration,
 			:resolution => 1.0,
 		),
@@ -274,9 +274,9 @@ DBInterface.execute(connection, "SELECT * FROM rep_periods_mapping") |> DataFram
 
 # ╔═╡ 52c41422-5e4d-4c0f-b9a8-7d91fbe6a811
 md"""
-#### `profiles_rep_periods_*`
+#### `profiles_rep_periods`
 
-This is just a split, subset and rename.
+This is just a rename of the `time_step` and `asset` columns.
 """
 
 # ╔═╡ 916ceea7-86a8-4714-aa37-06bf132bd80b
@@ -285,42 +285,27 @@ clustering_result.profiles
 # ╔═╡ 2a8683c0-7a48-4157-8c48-fb5cdaf2fcf2
 let
 	profiles = clustering_result.profiles
-	tc_assets = unique(profiles.asset)
-	profile_types = getindex.(split.(tc_assets, "-"), 1) |> unique
 
-	for profile_type in profile_types
-		DBInterface.execute(connection, "DROP VIEW IF EXISTS profiles_rep_periods_$profile_type")
-		df = DF.subset(
-			profiles,
-			:asset => DF.ByRow(startswith(profile_type))
-		) |> df -> DF.combine(df,
-			:asset => DF.ByRow(a -> split(a, "-")[2]) => :profile_name,
-			:rep_period,
-			:time_step => :timestep,
-			:value,
-		)
-		DDB.register_data_frame(connection, df, "profiles_rep_periods_$profile_type")
-	end
+	DBInterface.execute(connection, "DROP VIEW IF EXISTS profiles_rep_periods")
+	df = DF.combine(profiles,
+		:asset => :profile_name,
+		:rep_period,
+		:time_step => :timestep,
+		:value,
+	)
+	DDB.register_data_frame(connection, df, "profiles_rep_periods")
 end
 
 # ╔═╡ f419e9fe-962c-4377-b56c-41b6bb3483e4
-DBInterface.execute(connection, "SELECT * FROM profiles_rep_periods_demand LIMIT 5") |> DataFrame
+DBInterface.execute(connection, "SELECT * FROM profiles_rep_periods") |> DataFrame
 
-# ╔═╡ afa3f7b5-5d1a-4b75-8dcf-acace2c09b05
+# ╔═╡ 276266b8-6ee5-41fa-a0c5-8f1a49604b2a
 md"""
-#### `*_rep_periods_profiles`
-
-Let's just create a view because they have the same content.
-
-!!! warning "TODO"
-	Make TEM use the original names.
+### Tables so far
 """
 
-# ╔═╡ 653c44c0-3edc-41be-bbe0-76cf46590cdc
-let
-	DBInterface.execute(connection, "CREATE VIEW assets_rep_periods_profiles AS SELECT * FROM assets_profiles")
-	DBInterface.execute(connection, "CREATE VIEW flows_rep_periods_profiles AS SELECT * FROM flows_profiles")
-end
+# ╔═╡ 61ad8b15-a4a2-42e5-ad02-ad7871e093d6
+DBInterface.execute(connection, "SHOW TABLES") |> DataFrame
 
 # ╔═╡ 6b73622b-ad36-45eb-8005-bc23c9555f68
 md"""
@@ -347,24 +332,21 @@ For some of these, you might need additional profiles.
 In this section you can inform the timeframe profiles.
 
 !!! tip "TODO"
-	What to do for the default case? Should we allow missing tables? Should we create convenience functions?
-
-!!! tip "TODO"
 	Add some example timeframe profiles.
 """
 
 # ╔═╡ 10dbc445-3e9b-45a6-a67a-3469faf0106d
-let
-	DDB.register_data_frame(
-		connection,
-		DataFrame(
-			:asset => String[],
-			:profile_type => String[],
-			:profile_name => String[]
-		),
-		"assets_timeframe_profiles",
-	)
-end
+# let
+# 	DDB.register_data_frame(
+# 		connection,
+# 		DataFrame(
+# 			:asset => String[],
+# 			:profile_type => String[],
+# 			:profile_name => String[]
+# 		),
+# 		"assets_timeframe_profiles",
+# 	)
+# end
 
 # ╔═╡ dc52d2f3-6f24-4dd8-ac38-09bc94afe012
 md"""
@@ -383,59 +365,57 @@ We can change the partitioning of the representative period in the given situati
 
 !!! tip "TODO"
 	Add an example of partitioning
-
-!!! tip "TODO"
-	What should we do for the default case? Should we skip this if there is no table?
 """
 
 # ╔═╡ 6adb5dba-6a2a-44e3-b1e9-98e6f40beae4
-let
-	DDB.register_data_frame(
-		connection,
-		DataFrame(
-			:asset => String[],
-			:rep_period => Int[],
-			:specification => String[],
-			:partition => String[],
-		),
-		"assets_rep_periods_partitions",
-	)
-	DDB.register_data_frame(
-		connection,
-		DataFrame(
-			:from_asset => String[],
-			:to_asset => String[],
-			:rep_period => Int[],
-			:specification => String[],
-			:partition => String[],
-		),
-		"flows_rep_periods_partitions",
-	)
-	DDB.register_data_frame(
-		connection,
-		DataFrame(
-			:asset => String[],
-			:specification => String[],
-			:partition => String[],
-		),
-		"assets_timeframe_partitions",
-	)
-end
+# let
+# 	DDB.register_data_frame(
+# 		connection,
+# 		DataFrame(
+# 			:asset => String[],
+# 			:rep_period => Int[],
+# 			:specification => String[],
+# 			:partition => String[],
+# 		),
+# 		"assets_rep_periods_partitions",
+# 	)
+# 	DDB.register_data_frame(
+# 		connection,
+# 		DataFrame(
+# 			:from_asset => String[],
+# 			:to_asset => String[],
+# 			:rep_period => Int[],
+# 			:specification => String[],
+# 			:partition => String[],
+# 		),
+# 		"flows_rep_periods_partitions",
+# 	)
+# 	DDB.register_data_frame(
+# 		connection,
+# 		DataFrame(
+# 			:asset => String[],
+# 			:specification => String[],
+# 			:partition => String[],
+# 		),
+# 		"assets_timeframe_partitions",
+# 	)
+# end
 
 # ╔═╡ 05ab44cd-7f47-4a57-9124-d5d77dcca529
 md"""
 ### Step 3.2 - Creating and solving the model
 
 To finally create the model and solve it, we use the `EnergyProblem` structure.
-
+ 
 !!! tip "TODO"
 	Align this with the run-scenario interface, otherwise all the timing is lost. The users should inform what they expect to use here.
+	[TEM #665](https://github.com/TulipaEnergy/TulipaEnergyModel.jl/issues/665)
 """
 
 # ╔═╡ 3349642c-c466-4443-a75e-93a477ce4f17
 begin
 	energy_problem = TEM.EnergyProblem(connection)
-	TEM.create_model!(energy_problem)
+	TEM.create_model!(energy_problem)	
 	TEM.solve_model!(energy_problem)
 	energy_problem
 end
@@ -461,6 +441,7 @@ md"""
 ## Behind the scenes
 """
 
+
 # ╔═╡ f0f49ee6-e3ab-4103-b7a8-eabda6830745
 begin
 	function _nicename(filename)
@@ -475,18 +456,18 @@ begin
 end
 
 # ╔═╡ 657371f9-30a1-4b27-89e0-ba120dcca2eb
-begin
-	# For debugging
-	_rp_data = _read_csv("rep-periods-data.csv")
-	_rp_map = _read_csv("rep-periods-mapping.csv")
-	_profiles = Dict(
-		_nicename(filename) => _read_csv(filename)
+# begin
+# 	# For debugging
+# 	_rp_data = _read_csv("rep-periods-data.csv")
+# 	_rp_map = _read_csv("rep-periods-mapping.csv")
+# 	_profiles = Dict(
+# 		_nicename(filename) => _read_csv(filename)
 
-		for filename in readdir("Norse-from-TEM") if startswith("profiles-rep")(filename)
-	)
-	# End debugging
-	nothing
-end
+# 		for filename in readdir("Norse-from-TEM") if startswith("profiles-rep")(filename)
+# 	)
+# 	# End debugging
+# 	nothing
+# end
 
 # ╔═╡ 3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
 let
@@ -495,38 +476,33 @@ let
 		:time_step => Int[],
 		:value => Float64[],
 	)
-	for filename in readdir("Norse-from-TEM")
-		if !startswith("profiles-rep")(filename)
-			continue
-		end
-		profile_type = _nicename(filename)
-		df = _read_csv(filename)
-		profile_names = unique(df.profile_name)
-		# Ignore all content and generate fake data for the year
-		for profile_name in profile_names
-			value = clamp.(vcat([
-				DF.subset(
-					df,
-					:profile_name => DF.ByRow(==(profile_name)),
-					:rep_period => DF.ByRow(==(rp)),
-				).value
-				for rp in _rp_map.rep_period
-			]...) + 0.01 * randn(365 * 24), 0, 10)
-			append!(df_TC_profiles,
-				DataFrame(
-					:asset => fill("$profile_type-$profile_name", 365 * 24),
-					:time_step => 1:365 * 24,
-					:value => value,
-				)
+	filename = "profiles-rep-periods.csv"
+	df = _read_csv(filename)
+	profile_names = unique(df.profile_name)
+	
+	for profile_name in profile_names
+		value = clamp.(vcat([
+			DF.subset(
+				df,
+				:profile_name => DF.ByRow(==(profile_name)),
+				:rep_period => DF.ByRow(==(rp)),
+			).value
+			for rp in _rp_map.rep_period
+		]...) + 0.01 * randn(365 * 24), 0, 10)
+		append!(df_TC_profiles,
+			DataFrame(
+				:asset => profile_name,
+				:time_step => 1:365 * 24,
+				:value => value,
 			)
-		end
+		)
 	end
-	filename = joinpath("data", "all-profiles.csv")
+	filename = joinpath("data", "profiles.csv")
 	open(filename, "w") do io
 		println(io, ",,p.u.")
 	end
 	CSV.write(
-		joinpath("data", "all-profiles.csv"),
+		filename,
 		df_TC_profiles,
 		append=true,
 		writeheader=true,
@@ -577,28 +553,28 @@ end
 # ╠═7970c2ca-c828-4f83-99e3-18e4ed816b62
 # ╠═8e5d990c-8d56-47ee-b1df-b6d375586241
 # ╠═eb88c4aa-6c15-4a4e-a05e-951fa39a49e1
-# ╠═202cca05-e73b-43ed-a126-a52d43516741
+# ╟─202cca05-e73b-43ed-a126-a52d43516741
 # ╟─762be8a2-449e-4e55-aa0f-1e8a6860abf1
 # ╠═94fea98b-9f16-48ab-97fc-aa2467a7ced2
 # ╠═cbaa11c1-4b0f-462d-ab80-e2e653113769
 # ╠═197f49e9-9602-45c5-aa03-eb6bdd6c607b
-# ╟─52c41422-5e4d-4c0f-b9a8-7d91fbe6a811
+# ╠═52c41422-5e4d-4c0f-b9a8-7d91fbe6a811
 # ╠═916ceea7-86a8-4714-aa37-06bf132bd80b
 # ╠═2a8683c0-7a48-4157-8c48-fb5cdaf2fcf2
 # ╠═f419e9fe-962c-4377-b56c-41b6bb3483e4
-# ╟─afa3f7b5-5d1a-4b75-8dcf-acace2c09b05
-# ╠═653c44c0-3edc-41be-bbe0-76cf46590cdc
+# ╠═276266b8-6ee5-41fa-a0c5-8f1a49604b2a
+# ╠═61ad8b15-a4a2-42e5-ad02-ad7871e093d6
 # ╟─6b73622b-ad36-45eb-8005-bc23c9555f68
-# ╟─1ad97d2f-1716-47ea-a300-406d270fbe6f
+# ╠═1ad97d2f-1716-47ea-a300-406d270fbe6f
 # ╠═bbcca6dd-45d1-4d70-a0a3-cd91b8a1570b
 # ╠═10dbc445-3e9b-45a6-a67a-3469faf0106d
 # ╠═dc52d2f3-6f24-4dd8-ac38-09bc94afe012
 # ╠═6adb5dba-6a2a-44e3-b1e9-98e6f40beae4
-# ╠═05ab44cd-7f47-4a57-9124-d5d77dcca529
+# ╟─05ab44cd-7f47-4a57-9124-d5d77dcca529
 # ╠═3349642c-c466-4443-a75e-93a477ce4f17
 # ╠═c9a0cf5c-9b3f-44d5-9c9e-fc2124107497
 # ╠═30c724b9-a9ad-43e0-ab52-d63cbdd9f4cb
-# ╟─a029d632-9541-4211-afea-c53fe2bf2908
+# ╠═a029d632-9541-4211-afea-c53fe2bf2908
 # ╟─638aad2d-2c40-475c-81de-67696e4fef0c
 # ╠═f0f49ee6-e3ab-4103-b7a8-eabda6830745
 # ╠═657371f9-30a1-4b27-89e0-ba120dcca2eb
