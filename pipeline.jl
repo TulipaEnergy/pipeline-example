@@ -1,20 +1,34 @@
 ### A Pluto.jl notebook ###
-# v0.19.42
+# v0.19.43
 
 using Markdown
 using InteractiveUtils
 
+# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
+macro bind(def, element)
+  quote
+    local iv = try
+      Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value
+    catch
+      b -> missing
+    end
+    local el = $(esc(element))
+    global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
+    el
+  end
+end
+
 # ╔═╡ 6876e975-7525-4139-803b-7bc7d939d6b5
-using CSV, DataFrames, DuckDB, JuMP, Plots, PlutoUI , TulipaClustering , TulipaEnergyModel , TulipaIO, SparseArrays
+using CSV, DataFrames, DuckDB, JuMP, Plots, PlutoUI, TulipaClustering, TulipaEnergyModel, TulipaIO, SparseArrays
 
 # ╔═╡ 5e8526b5-f13c-45a5-9d61-8acdfa014f50
 begin
-	DF = DataFrames
-	DDB = DuckDB
-	PUI = PlutoUI
-	TC = TulipaClustering
-	TEM = TulipaEnergyModel
-	TIO = TulipaIO
+  DF = DataFrames
+  DDB = DuckDB
+  PUI = PlutoUI
+  TC = TulipaClustering
+  TEM = TulipaEnergyModel
+  TIO = TulipaIO
 end
 
 # ╔═╡ a46312ec-7cc7-432b-8965-a82f4a163a4b
@@ -72,11 +86,11 @@ Reading all CSV files from the `data` folder. Rerun below whenever there are fil
 
 # ╔═╡ 38f7f8cb-9f64-47be-8d9e-91f24091c341
 begin
-	connection = DBInterface.connect(DDB.DB)
-	TIO.read_csv_folder(connection, "data")
+  connection = DBInterface.connect(DDB.DB)
+  TIO.read_csv_folder(connection, "data")
 
-	# Inspect initial tables
-	TIO.show_tables(connection)
+  # Inspect initial tables
+  TIO.show_tables(connection)
 end
 
 # ╔═╡ 84ff13ef-4b9a-4396-a37c-770d82ee5933
@@ -111,7 +125,7 @@ DDB.execute(connection, "SELECT * FROM profiles WHERE profile_name = 'availabili
 
 # ╔═╡ 652457bd-5391-4ef5-b714-32eebbd15cbb
 Plots.plot(
-	DDB.execute(connection, "SELECT value FROM profiles WHERE profile_name = 'demand-Midgard_E_demand'") |> DataFrame |> df -> df.value
+  DDB.execute(connection, "SELECT value FROM profiles WHERE profile_name = 'demand-Midgard_E_demand'") |> DataFrame |> df -> df.value
 )
 
 # ╔═╡ 9ebf99c7-4296-4541-95f0-0a5b84c2488a
@@ -144,10 +158,10 @@ The representatives are computed using the whole profiles information, so all pr
 
 # ╔═╡ 9cd57f33-9906-4f29-af51-b30a688cade6
 begin
-	period_duration = 24 # will be used later
-	tc_df = TIO.get_table(connection, "profiles")
-	TC.split_into_periods!(tc_df; period_duration = period_duration)
-	nothing
+  period_duration = 24 # will be used later
+  tc_df = TIO.get_table(connection, "profiles")
+  TC.split_into_periods!(tc_df; period_duration)
+  nothing
 end
 
 # ╔═╡ 8ace55c3-9ac9-4c25-b4d5-364e5d33dd1b
@@ -157,16 +171,21 @@ DF.subset(tc_df, :profile_name => DF.ByRow(==("availability-Asgard_Solar")))
 # ╔═╡ df1a421e-7d54-48a5-9f91-14175e0fd596
 # Example asset
 DF.subset(
-	tc_df,
-	:profile_name => DF.ByRow(==("availability-Asgard_Solar")),
-	:period => DF.ByRow(==(1)),
+  tc_df,
+  :profile_name => DF.ByRow(==("availability-Asgard_Solar")),
+  :period => DF.ByRow(==(1)),
 )
+
+# ╔═╡ 8c482ee3-c0d3-4e4f-8ab6-979e75b94479
+md"""
+Number of representatives = $(@bind nrp Slider(1:365, default=5, show_value=true))
+"""
 
 # ╔═╡ 2d123f6b-1d94-425a-b37b-acc71e035519
 begin
-	num_rep_periods = 5
-	clustering_result = TC.find_representative_periods(tc_df, num_rep_periods)
-	nothing
+  num_rep_periods = nrp
+  clustering_result = TC.find_representative_periods(tc_df, num_rep_periods)
+  nothing
 end
 
 # ╔═╡ e0a815ad-de49-459e-b5e3-72e9418a9283
@@ -177,15 +196,15 @@ clustering_result.profiles
 
 # ╔═╡ 7970c2ca-c828-4f83-99e3-18e4ed816b62
 DF.subset(
-	clustering_result.profiles,
-	:profile_name => DF.ByRow(==("availability-Asgard_Solar"))
+  clustering_result.profiles,
+  :profile_name => DF.ByRow(==("availability-Asgard_Solar"))
 )
 
 # ╔═╡ 8e5d990c-8d56-47ee-b1df-b6d375586241
 DF.subset(
-	clustering_result.profiles,
-	:profile_name => DF.ByRow(==("availability-Asgard_Solar")),
-	:rep_period => DF.ByRow(==(1)),
+  clustering_result.profiles,
+  :profile_name => DF.ByRow(==("availability-Asgard_Solar")),
+  :rep_period => DF.ByRow(==(1)),
 )
 
 # ╔═╡ 202cca05-e73b-43ed-a126-a52d43516741
@@ -317,10 +336,10 @@ To finally create the model and solve it, we use the `EnergyProblem` structure.
 
 # ╔═╡ 3349642c-c466-4443-a75e-93a477ce4f17
 begin
-	energy_problem = TEM.EnergyProblem(connection)
-	TEM.create_model!(energy_problem)	
-	TEM.solve_model!(energy_problem)
-	energy_problem
+  energy_problem = TEM.EnergyProblem(connection)
+  TEM.create_model!(energy_problem)
+  solution = TEM.solve_model!(energy_problem)
+  energy_problem
 end
 
 # ╔═╡ c9a0cf5c-9b3f-44d5-9c9e-fc2124107497
@@ -347,15 +366,15 @@ md"""
 
 # ╔═╡ f0f49ee6-e3ab-4103-b7a8-eabda6830745
 begin
-	function _nicename(filename)
-		filename = replace(filename, "profiles-rep-periods-" => "")
-		filename = replace(filename, "-" => "_")
-		filename, _ = splitext(filename)
-		filename
-	end
-	function _read_csv(filename)
-		CSV.read(joinpath("Norse-from-TEM", filename), DataFrame; header=2)
-	end
+  function _nicename(filename)
+    filename = replace(filename, "profiles-rep-periods-" => "")
+    filename = replace(filename, "-" => "_")
+    filename, _ = splitext(filename)
+    filename
+  end
+  function _read_csv(filename)
+    CSV.read(joinpath("Norse-from-TEM", filename), DataFrame; header=2)
+  end
 end
 
 # ╔═╡ 657371f9-30a1-4b27-89e0-ba120dcca2eb
@@ -374,43 +393,43 @@ end
 
 # ╔═╡ 3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
 let
-	df_TC_profiles = DataFrame(
-		:profile_name => String[],
-		:timestep => Int[],
-		:value => Float64[],
-	)
-	filename = "profiles-rep-periods.csv"
-	df = _read_csv(filename)
-	profile_names = unique(df.profile_name)
-	rp_map = _read_csv("rep-periods-mapping.csv")
-	
-	for profile_name in profile_names
-		value = clamp.(vcat([
-			DF.subset(
-				df,
-				:profile_name => DF.ByRow(==(profile_name)),
-				:rep_period => DF.ByRow(==(rp)),
-			).value
-			for rp in rp_map.rep_period
-		]...) + 0.01 * randn(365 * 24), 0, 10)
-		append!(df_TC_profiles,
-			DataFrame(
-				:profile_name => profile_name,
-				:timestep => 1:365 * 24,
-				:value => value,
-			)
-		)
-	end
-	filename = joinpath("data", "profiles.csv")
-	open(filename, "w") do io
-		println(io, ",,p.u.")
-	end
-	CSV.write(
-		filename,
-		df_TC_profiles,
-		append=true,
-		writeheader=true,
-	)
+  df_TC_profiles = DataFrame(
+    :profile_name => String[],
+    :timestep => Int[],
+    :value => Float64[],
+  )
+  filename = "profiles-rep-periods.csv"
+  df = _read_csv(filename)
+  profile_names = unique(df.profile_name)
+  rp_map = _read_csv("rep-periods-mapping.csv")
+
+  for profile_name in profile_names
+    value = clamp.(vcat([
+        DF.subset(
+          df,
+          :profile_name => DF.ByRow(==(profile_name)),
+          :rep_period => DF.ByRow(==(rp)),
+        ).value
+        for rp in rp_map.rep_period
+      ]...) + 0.001 * randn(365 * 24), 0, 1)
+    append!(df_TC_profiles,
+      DataFrame(
+        :profile_name => profile_name,
+        :timestep => 1:365*24,
+        :value => value,
+      )
+    )
+  end
+  filename = joinpath("data", "profiles.csv")
+  open(filename, "w") do io
+    println(io, ",,p.u.")
+  end
+  CSV.write(
+    filename,
+    df_TC_profiles,
+    append=true,
+    writeheader=true,
+  )
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -1924,6 +1943,7 @@ version = "1.4.1+1"
 # ╠═9cd57f33-9906-4f29-af51-b30a688cade6
 # ╠═8ace55c3-9ac9-4c25-b4d5-364e5d33dd1b
 # ╠═df1a421e-7d54-48a5-9f91-14175e0fd596
+# ╟─8c482ee3-c0d3-4e4f-8ab6-979e75b94479
 # ╠═2d123f6b-1d94-425a-b37b-acc71e035519
 # ╠═e0a815ad-de49-459e-b5e3-72e9418a9283
 # ╠═c409d91a-0938-40d0-88dc-9df4fd8a980f
@@ -1949,6 +1969,6 @@ version = "1.4.1+1"
 # ╟─638aad2d-2c40-475c-81de-67696e4fef0c
 # ╟─f0f49ee6-e3ab-4103-b7a8-eabda6830745
 # ╟─657371f9-30a1-4b27-89e0-ba120dcca2eb
-# ╟─3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
+# ╠═3bd6c7aa-ea9d-4e95-9c98-d2ed245f8600
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
